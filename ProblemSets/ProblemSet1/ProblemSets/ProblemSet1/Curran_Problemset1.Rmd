@@ -1,0 +1,210 @@
+---
+title: "R Notebook"
+---
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(stringr)
+df = read_csv("Food_Inspections.csv")
+df$`Facility Type` =  toupper(df$`Facility Type`)
+df$`Inspection Date` = as.Date(df$`Inspection Date`, format = "%m/%d/%Y")
+
+df$Inspection_year = as.factor(year(df$`Inspection Date`))
+df$`Inspection ID` = as.factor(df$`Inspection ID`)
+
+```
+
+The ‘Food Inspections’ data set is curated as part of the City of Chicago’s Data Portal and is cataloged in the Health and Human Services section. The data set was created from inspections of restaurants and other food establishments throughout Chicago, starting in June of 2010 and continues to present day, with its last update being April 15, 2018. The data was produced using the Chicago Department of Public Health’s Food Protection Program that uses the department’s standard procedure for inspection and evaluation. The evaluations, maintained in a database, is approved by the State of Illinois Licensed Environmental Health Practitioner (LEHP).
+
+Projects that use this data source are:
+
+[Food Inspections Project](https://chicago.github.io/food-inspections-evaluation/)
+[Chicago Department of Public Health](https://github.com/Chicago/food-inspections-evaluation)
+
+Articles:
+
+[Chicago's Data Powered Recipe for Food Safety](http://www.governing.com/blogs/bfc/gov-chicago-data-analytics-restaurant-inspections-food-safety.html)
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+df$violation_code = stringr::str_extract(df$Violations, "[0-9]{1,5}")
+
+library(qwraps2)
+results = unique(df$Results)
+risk = unique(df$Risk)
+inspection_type = unique(df$`Inspection Type`)
+options(qwraps2_markup = "markdown")
+summary1 <- 
+  list("Results" =
+         list(
+           "Pass" = ~qwraps2::perc_n(Results == results[1]),
+           "Pass w/ Conditions" = ~qwraps2::perc_n(Results == results[2]),
+           "No Entry" = ~qwraps2::perc_n(Results == results[3]),
+           "Fail" = ~qwraps2::perc_n(Results == results[4]),
+           "Not Ready" = ~qwraps2::perc_n(Results == results[5]),
+           "Out of Business" = ~qwraps2::perc_n(Results == results[6])
+         ),
+       "Risk" = list(
+         "Risk 1 (High)" = ~qwraps2::perc_n(Risk == risk[1], na_rm = T),
+         "Risk 2 (Medium)" = ~qwraps2::perc_n(Risk == risk[2], na_rm = T),
+         "Risk 3 (Low)" = ~qwraps2::perc_n(Risk == risk[3], na_rm = T)
+       ),
+       "Inspections" = 
+         list(
+           "Total Inspections" = ~ length((`Inspection Type`)),
+           "Number of Different Inspection Type" = ~ length(unique(`Inspection Type`))
+         ),
+       "Facilities" = 
+         list(
+           "Number of Facilities" = ~ length(unique(`DBA Name`)),
+           "Number of Facility Types" = ~length(unique(`Facility Type`))
+         ),
+       "Geography" = 
+         list(
+           "Min Latitude" = ~ min(Latitude, na.rm = T),
+           "Max Latitude" = ~ max(Latitude, na.rm = T),
+           "Min Longitude" = ~ min(Longitude, na.rm = T),
+           "Max Longitude" = ~ max(Longitude, na.rm = T)
+         ),
+       "Violations" = 
+         list(
+           "Number of Violations" = ~length((Violations[!is.na(Violations)]))
+         )
+      )
+
+print(summary_table(dplyr::group_by(df, Inspection_year), summary1), 
+      rtitle = "Food Inspections Data Set Summary Statistics",
+      cnames = c("2010", "2011", "2013", "2013","2014", "2015","2016","2017","2018"))
+
+
+```
+##### Visualizations
+
+***
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+df = filter(df, !is.na(df$Results))
+
+df$inspection_month = lubridate::month(df$`Inspection Date`)
+
+df_viz = group_by(df, Inspection_year, Results) %>%
+  summarise(number_results = n())
+
+
+df_yr_total = group_by(df, Inspection_year) %>%
+  summarise(count = n())
+
+df_viz = left_join(df_viz, df_yr_total, by = c("Inspection_year"))
+
+df_viz$share_results = round(df_viz$number_results / df_viz$count,2)
+
+df_viz
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(df_yr_total, aes(x =Inspection_year, y = count))+geom_col() +
+  xlab("Inspection Year") +
+  ylab("Number of Inspections") +
+  theme_light() +
+  ggtitle("Number of Inspections Per Year") +
+  scale_y_continuous(labels=comma) 
+```
+
+***
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(df_viz, aes(x =Inspection_year, y = share_results, group = Results, fill = Results))+geom_col(position = "stack") +
+  xlab("Inspection Year") +
+  ylab("% of Inspection Outcomes") +
+  theme_light() +
+  scale_y_continuous(labels=percent) +
+  ggtitle("Share of Results of Inspections by Year (2010 - 2018)")
+```
+
+***
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(df_viz, aes(x =Inspection_year, y = share_results, group = Results, color = Results))+geom_point() + geom_line() +
+  xlab("Inspection Year") +
+  ylab("Change in Inspection Outcomes Over Time") +
+  theme_light() +
+  scale_y_continuous(labels=percent)
+```
+
+***
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(scales)
+df$`Facility Type` = toupper(df$`Facility Type`)
+
+df_viz2 = group_by(df, df$`Facility Type`, df$Results) %>%
+  summarise(number_results = n())
+
+colnames(df_viz2) = c("Facility Type", "Result","Number of Results")
+
+facilities = group_by(df, df$`Facility Type`) %>%
+  summarise(num_facilities = n())
+
+colnames(facilities)[1] = "Facility Type"
+colnames(facilities)[2] = "Number of Facilities"
+
+df.x = merge(df_viz2, facilities, by.x="Facility Type", by.y = "Facility Type")
+
+df.x = arrange(df.x, desc(df.x$`Number of Facilities`) )
+
+df.x =head(df.x, 21)
+
+df.x$percent = df.x$`Number of Results`/df.x$`Number of Facilities`
+
+ggplot(df.x, aes(x = `Facility Type`, y = percent, fill = Result)) + 
+  geom_col() +
+  ylab("Percent of Facilities") +
+  ggtitle("Top 3 Most Inspected Facility Type by Result") +
+  scale_y_continuous(label = percent)
+
+```
+
+***
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+df2 = group_by(df, Inspection_year) %>% summarize(num_licenses = n_distinct(`License #`))
+
+ggplot(df2, aes(y = num_licenses, x = Inspection_year)) + 
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = comma) +
+  theme_light() +
+  xlab("Year") +
+  ylab("Number of Licenses") + 
+  ggtitle("Number of Facility Licenses 2010 - 2018")
+```
+
+******
+
+### Part 2: Critique of Research paper:
+
+Justin Grimmer's paper *Measuring Representational Style in the House: The Tea Party and Legislator's Changeing Expressed Prioritie* seeks to answer the following research questions:
+
+1) How do legislators define the type of representation they provide to constituents?
+
+2) How does this definition of representation change in response to shifts in electoral pressure and changes in party control of Congress?
+
+Gimmer relies on several computational methods and modeling approaches to answer these questions.
+
+In this paper, Grimmer uses the large collection of Congressional texts to categorize what legislators say and ultimately, why what they say matters for representation. The corpus of his analysis contains the nearly 170,000 press realeases from each house office from 2005 to 2010. Grimmer justifies the use of this data set by citing the fact that press releases are the most accurate and clear way that politicians respond to events in order to communicate with their constituents. 
+
+The analysis employs a formal model in his analysis, specifically using hierarchical topic modeling concepts in order to address his research question. He uses hierarchical topic modeling to generate topics as well as quantify how much attention the legislators pay those topics. Building off of Panchinko Allocation Models, Grimmer justifies his choice in theory and methods by claiming substantive and statistical usefulness. Substantively speaking, the model "provides an automatic classification between more position, credit claiming, and advertising press realeses". As opposed to previous topic modeling theorys and procedures which required a manual second step to classify the texts, which was ultimatley cumbersome. Statistically speaking, the model help address the number of topics in a model. Because topic modeling is a form of unsupervised learning, there can be any number of topics extracted from the texts, making the analysis potentially computentionally expensive and time consuming. However, Grimmer's use of the Pachinko Allocation models allows for create a granular, more focused set of topics, and another more broad topics. The granular set of topics is intended to capture the attitudes of legislators in specific policy debates, while the broader one is intended to capture differences in the types of language legislators use when they communicate with constituents. 
+
+I believe that Grimmer's paper was a combination of a descriptive study and identification exercise. I would hesitate to call Grimmer's chapter a numerical solution to a system of equations study because he is applying such concepts to a corpus and not necessarily creating the mathematical concept or proof himself. Identification papers typically show their interesting slices of their data and its results. Here, Grimmer includes several interesting graphs and tables that came from applying the topic modeling method to the press release corpus. For example, Figure 1 on page 15 shows a graphical representation of the level attetnion given to a topic as it corresponds to events in the real world. Grimmer's paper can be categorized as an identification exercise because he draws conclusions from the topic modeling to infer how legislators represent their constituents, as well as how representation shifts electoral pressure. In otherwords, from his analysis Grimmer is able to map a relationship between how legisltor's understanding of representation shifts party control of congress through applying topic modeling on congressional texts. 
+
+Through using heirarchical topic modeling Grimmer finds that Republican House members "abandon credit claiming" after President Obama is election, and Democratic House members "amplifly their credit claiming". Though such a shift ocurrs, Grimmer's analysis shows that the legislator's attention to broader topics remain relatively stable over time. Grimmer does not specificy which computational tools that he used in his analysis (i.e. R versus Python). Mathematically speaking, Grimmer (after pre-processing the text) computational methods uses regression, Bayesian statistcs, and uses a mixture of von-Mises Fisher distributions, and distributions on a hypershpere (vectors that have a euclidean length of 1). Grimmer also uses the "variational approximation describes in Blaydes" to approximate the posterior. He applies this model to 44 granular topics and 8 coarse topics. 
+
+My first suggestion to Grimmer would be to expand the scope of his data set. While the congressional press releases are valuable information, they go through rigorous filters and are controlled. If, however, a politician prefers to communicate with their constituents through social media, the analysis could be very different. Using social media as a text source allows for a much less filtered and prepared response in order to capture the legislator's possible changes in attitude. Furthermore, using an always-on data source like twitter can allow legislators to respond to events much faster than if they issues a press release and therefore provide a deeper answer to the paper's research question. Additionally, using social media is a way for legislators to directly engage with non-political and non-media individuals. Because both of these groups can manipulate communications press releases are often geared towards them and not the consituents. A second recommendation to this paper. The second recommendation I would suggest is to say which tools they used to create this analysis. From thelooks of the graphs, Grimmer could have possibly used R, but that is entirely guesswork. Explicitly stating what tools he used could help the reproducability of his work. Furthermore, by stating which tools he used any inherent bias arising from a package's underlying algorithms could help explain the results of the paper. The biggest issue with not listing computational tools is the fact that there are fewer people that can reproduce his calculations in order to validat them. 
+
+
